@@ -1,4 +1,4 @@
-; Simple x86_64 bootloader: enters long mode and halts
+; Simple x86_64 bootloader: loads a C kernel and enters long mode
 ; Assembles with NASM: nasm -f bin bootloader.asm -o bootloader.bin
 
 BITS 16
@@ -12,10 +12,26 @@ start:
     mov ss, ax
     mov sp, 0x7C00
 
+    mov [boot_drive], dl
+
     ; Enable A20 via port 0x92 (fast A20)
     in al, 0x92
     or al, 0x02
     out 0x92, al
+
+    ; Load kernel from disk (LBA 1) into 0x10000
+    mov si, dap
+    mov ah, 0x42
+    mov dl, [boot_drive]
+    int 0x13
+    jc disk_error
+    jmp continue_boot
+
+disk_error:
+    hlt
+    jmp disk_error
+
+continue_boot:
 
     ; Setup temporary GDT for protected mode and long mode
     lgdt [gdt_descriptor]
@@ -78,6 +94,9 @@ long_mode:
     mov ss, ax
     mov rsp, 0x9FC00
 
+    mov rax, KERNEL_LOAD_ADDR
+    jmp rax
+
 halt:
     hlt
     jmp halt
@@ -102,6 +121,19 @@ CODE32_SEL equ 0x08
 DATA32_SEL equ 0x10
 CODE64_SEL equ 0x18
 DATA64_SEL equ 0x20
+
+KERNEL_LOAD_ADDR equ 0x10000
+KERNEL_SECTORS   equ 32
+
+boot_drive: db 0
+
+dap:
+    db 0x10
+    db 0x00
+    dw KERNEL_SECTORS
+    dw 0x0000
+    dw 0x1000
+    dq 0x0000000000000001
 
 ; Boot signature
 TIMES 510 - ($ - $$) db 0
